@@ -6,14 +6,21 @@ import copy
 import uuid
 import argparse  
 
-logging.basicConfig(level=logging.DEBUG)
-
+def validate_device_key(s):
+    try:
+        #Make sure user specified a string of 32 characters
+        if (len(s) != 32):
+            raise argparse.ArgumentTypeError('Must be 32 characters long hexadecimal string!')
+        int(s, 16)
+    except Exception as ex:
+        raise argparse.ArgumentTypeError('Invalid device key specified!')
+        
 class Hex_File(object):
     """
     This class handles patching the hex file with new device key and unicast address.            
     """
     #def __init__(self, hex_file, db_file, start_node=None):
-    def __init__(self, options):
+    def __init__(self, options, start_node=None):
         """
         Initializer function.
         
@@ -25,8 +32,10 @@ class Hex_File(object):
                       If specified as None, the last node in db_file is used to obtain the device key.
         """
         try:
-            self.hf_db = MeshDB(db_file)
-            self.hf_hex_file = IntelHex(hex_file)
+            #self.hf_db = MeshDB(db_file)
+            self.hf_db = MeshDB(options.db_input_file)
+            #self.hf_hex_file = IntelHex(hex_file)
+            self.hf_hex_file = IntelHex(options.hex_input_file)
             self.hf_number_of_nodes = len(self.hf_db.nodes)
             if start_node is not None:
                 self.hf_working_node = self.hf_db.nodes[start_node]
@@ -119,21 +128,32 @@ if __name__ == '__main__':
         description="Nordic Mesh firmware patching script")
     parser.add_argument("--hex-input-file",
                         dest="hex_input_file",                        
-                        required=True,
-                        type=argparse.FileType('r', encoding='UTF-8'),
+                        required=True,                        
                         help=("Specify the Intel Hex file to be used as input. "
                               + "Contents will be read from this file and patched. "
                               + "This file will NOT be modified."))
     parser.add_argument("--db-input-file",
                         dest="db_input_file",
-                        required=True,
-                        type=argparse.FileType('r', encoding='UTF-8'),
+                        required=True,                        
                         help="Specify the JSON file that holds the mesh network state.")
     parser.add_argument("--hex-output-file",
-                        dest="hex_output_file",
-                        type=argparse.FileType('r', encoding='UTF-8'),
+                        dest="hex_output_file",                        
                         required=True,                        
                         help="Specify the name of the patched output file.")
+    parser.add_argument("--start-node",
+                        dest="start_node",                        
+                        required=False,
+                        type=int,
+                        #choices=range(0, 16383),
+                        help="This is the zero-based index of the mesh node in the JSON file which correlates to the input firmware "
+                                + "file.  The device key and unicast address specified for this node in the database file "
+                                + "will be searched for in the firmware and replaced.  If not specified, the last node in the database file is used.")
+    parser.add_argument("--device-key",
+                        dest="device_key",                        
+                        required=False,
+                        type=validate_device_key,
+                        help="A 32 character hexadecimal value that defines a device key.  "
+                                + "If not specified, a random value is auto-generated.")                                
     parser.add_argument("-l", "--log-level",
                         dest="log_level",
                         type=int,
