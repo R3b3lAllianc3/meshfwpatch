@@ -14,7 +14,21 @@ def validate_device_key(s):
         int(s, 16)
     except Exception as ex:
         raise argparse.ArgumentTypeError('Invalid device key specified!')
-        
+
+def validate_start_node(s):
+    try:
+        converted_int = int(s, 10)
+        if ((converted_int < 0x0) or (converted_int > 0x3FFF)):
+            raise argparse.ArgumentTypeError('Start node value must be a positive number and less than 0x4000!')
+    except Exception as ex:
+        raise argparse.ArgumentTypeError('Invalid start node specified!')        
+
+def validate_unicast_address(s):
+    try:
+        converted_int = int(s, 16)
+    except Exception as ex:
+        raise argparse.ArgumentTypeError('Invalid unicast address specified!')
+     
 class Hex_File(object):
     """
     This class handles patching the hex file with new device key and unicast address.            
@@ -139,21 +153,30 @@ if __name__ == '__main__':
     parser.add_argument("--hex-output-file",
                         dest="hex_output_file",                        
                         required=True,                        
-                        help="Specify the name of the patched output file.")
+                        help="Specify the name of the patched output file that will be created.")
     parser.add_argument("--start-node",
                         dest="start_node",                        
                         required=False,
-                        type=int,
-                        #choices=range(0, 16383),
+                        type=validate_start_node,                        
                         help="This is the zero-based index of the mesh node in the JSON file which correlates to the input firmware "
                                 + "file.  The device key and unicast address specified for this node in the database file "
-                                + "will be searched for in the firmware and replaced.  If not specified, the last node in the database file is used.")
+                                + "will be searched for in the firmware and replaced.  If not specified, the last node in the database file is used.  "
+                                + "This value must be specified in base 10.")
     parser.add_argument("--device-key",
                         dest="device_key",                        
                         required=False,
                         type=validate_device_key,
-                        help="A 32 character hexadecimal value that defines a device key.  "
-                                + "If not specified, a random value is auto-generated.")                                
+                        metavar="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                        help="A 32-character hexadecimal value that specifies a device key.  "
+                                + "If not specified, a random value is auto-generated.  ")  
+    parser.add_argument("--unicast-addr",
+                        dest="unicast_address",                        
+                        required=False,
+                        type=validate_unicast_address,
+                        metavar="0xyyyy",
+                        help="A 16-bit hexadecimal value that specifies a unicast address.  "
+                                + "This value is unique per node.  If specified, ensure it is valid as uniqueness is not ascertained by this script.  "
+                                + "If not specified, a unique value is auto-generated.  ")  
     parser.add_argument("-l", "--log-level",
                         dest="log_level",
                         type=int,
