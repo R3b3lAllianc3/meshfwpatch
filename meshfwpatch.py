@@ -31,6 +31,19 @@ def validate_unicast_address(s):
         return int(s, 16)
     except Exception as ex:
         raise argparse.ArgumentTypeError('Invalid unicast address specified!')
+
+def list_db_info(s):
+    try:
+        db = MeshDB(s)        
+        for i in db.nodes:
+            print('');
+            print('Node name: {0}'.format(i.name))
+            print('Device key: {0}'.format(i.device_key.hex()))
+            print('Unicast address: {0}'.format(hex(i.unicast_address)))
+            print('');
+    except Exception as ex:
+        logging.exception("Error parsing JSON file")
+    sys.exit(-1)
      
 class Hex_File(object):
     """
@@ -137,6 +150,15 @@ class Hex_File(object):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="Nordic Mesh firmware patching script")
+    parser.add_argument("--list-info",
+                        dest="list_info",
+                        metavar="DB_INPUT_FILE",
+                        required=False,                                                
+                        default=None,
+                        type=list_db_info,
+                        help="List the device key, unicast address, and node name for each node found in the specified JSON file.  "                                
+                                + "If this command is specified, all other commands are ignored.  Useful for informational purposes."
+                        )
     parser.add_argument("--hex-input-file",
                         dest="hex_input_file",                        
                         required=True,                        
@@ -173,7 +195,8 @@ if __name__ == '__main__':
                         metavar="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
                         default=None,
                         help="A 32-character hexadecimal value that specifies a device key i.e. '0371592428B84C66F91D3466421C4FC1'.  "
-                                + "If not specified, a random value is auto-generated.  "
+                                + "This value is patched into the generated output firmware for the new node. "
+                                + "If not specified, a random value is auto-generated."
                         )  
     parser.add_argument("--unicast-addr",
                         dest="unicast_address",                        
@@ -183,15 +206,15 @@ if __name__ == '__main__':
                         default=None,
                         help="A 16-bit hexadecimal value that specifies a unicast address.  "
                                 + "This value is unique per node.  If specified, ensure it is valid as uniqueness is not ascertained by this script.  "
-                                + "If not specified, a unique value is auto-generated.  "
+                                + "If not specified, a unique value is auto-generated."
                         )  
     parser.add_argument("--node-name",
                         dest="node_name",                        
                         required=False,                                                
                         default=None,
                         help="Specify the new node's name to be recorded in the JSON file.  "                                
-                                + "If not specified, a unique name is auto-generated.  "
-                        )  
+                                + "If not specified, a unique name is auto-generated."
+                        )
     parser.add_argument("-l", "--log-level",
                         dest="log_level",
                         type=int,
