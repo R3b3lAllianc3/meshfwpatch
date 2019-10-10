@@ -34,39 +34,34 @@ class Hex_File(object):
     This class handles patching the hex file with new device key and unicast address.            
     """
     #def __init__(self, hex_file, db_file, start_node=None):
-    def __init__(self, options, start_node=None):
+    def __init__(self, options):
         """
         Initializer function.
         
         Keyword arguments:
-        hex_file   -- This is the full path and filename of the hex file that has been ripped from a provisioned node.
-        db_file    -- This is the full path and filename of the JSON database file from which we will be extracting device key and unicast address from.
-                      This file is typically created by PyACI in scripts/interactive_pyaci/database/ directory and has the device key that matches the device key in the firmware.
-        start_node -- If specified then this is the node within db_file from which to get device key from.  This number is a zero-based index.
-                      If specified as None, the last node in db_file is used to obtain the device key.
+        options -- Object created by parser.parse_args() that holds all the parameter values.
         """
         try:
-            #self.hf_db = MeshDB(db_file)
-            self.hf_db = MeshDB(options.db_input_file)
-            #self.hf_hex_file = IntelHex(hex_file)
+            self.hf_db = MeshDB(options.db_input_file)            
             self.hf_hex_file = IntelHex(options.hex_input_file)
             self.hf_number_of_nodes = len(self.hf_db.nodes)
-            if start_node is not None:
-                self.hf_working_node = self.hf_db.nodes[start_node]
+            self.hf_start_node = options.start_node
+            if self.hf_start_node is not None:
+                self.hf_working_node = self.hf_db.nodes[self.hf_start_node]
             else:
-                self.hf_working_node = self.hf_db.nodes[(self.hf_number_of_nodes - 1)]           
+                self.hf_working_node = self.hf_db.nodes[(self.hf_number_of_nodes - 1)]
+            self.hf_output_hex_fw_name = options.hex_output_file
+            self.hf_new_device_key = options.device_key
+            #Create new device key, if not specified
+            if self.hf_new_device_key is None:
+                self.hf_new_device_key = uuid.uuid4()            
+            self.hf_new_unicast_addr = options.unicast_address
         except Exception as ex:
             logging.exception("Initialization error")
                         
-    def patch_hex_file(self, output_hex_file, new_device_key=None, new_unicast_addr=None):
+    def patch_hex_file(self):
         """
-        This function patches the hex file with the new device key and the new unicast address.
-        
-        Keyword arguments:
-        new_device_key     -- If specified then it's a 16-byte hex string i.e. '0371592428B84C66F91D3466421C4FC1'.
-                              If specified as None, then new device key will be generated automatically.
-        new_unicast_addr   -- If specified then it's specified as a 16-bit hex value i.e. 0x0011
-                              If specified as None, then new unicast address will be generated automatically.        
+        This function patches the hex file with the new device key and the new unicast address.        
         """
         try:
             #Get the device key from the database file
@@ -90,17 +85,12 @@ class Hex_File(object):
                 logging.info('Flash Area Manager signature not found at expected location {0}'.format(hex(self.hf_expected_start_of_flash_manager_index)))
                 raise ValueError('Flash Area Manager signature not found at expected location {0}'.format(hex(self.hf_expected_start_of_flash_manager_index)))
             else:
-                logging.info('Flash Area Manager signature found at expected location {0}'.format(hex(self.hf_expected_start_of_flash_manager_index)))   
-            #Create new device key
-            if new_device_key is None:
-                self.hf_new_device_key = uuid.uuid4()
-            else:
-                self.hf_new_device_key = new_device_key #TODO: validate new_device_key is valid                              
+                logging.info('Flash Area Manager signature found at expected location {0}'.format(hex(self.hf_expected_start_of_flash_manager_index)))                      
             #Get offset for both occurences of device handle which also needs to be updated per device
             self.hf_expected_device_uc_addr_index = (self.hf_expected_start_of_flash_manager_index + 28)
             self.hf_expected_device_uc_addr_index_second = (self.hf_expected_start_of_flash_manager_index + 28 + 32)                                    
             #Create new unicast address by reading all existing unicast addresses in the db file, finding the max, and incrementing the largest one by one.
-            if new_unicast_addr is None:                            
+            if self.hf_new_unicast_addr is None:                            
                 #Create a list of unicast addresses from the db file
                 self.unicast_address_list = []
                 for i in self.hf_db.nodes:
@@ -108,9 +98,7 @@ class Hex_File(object):
                 #Find highest unicast address and increment by 1 to create new unicast address
                 self.next_unicast_address = max(self.unicast_address_list) + 1
                 logging.info('Next available unicast address is {0}'.format(hex(self.next_unicast_address)))
-                self.hf_new_unicast_addr = self.next_unicast_address
-            else:
-                self.hf_new_unicast_addr = new_unicast_addr #TODO: validate new_unicast_addr is valid                              
+                self.hf_new_unicast_addr = self.next_unicast_address                                       
             #Update device unicast address in output bytearray
             self.hf_output_hex_fw_bytearray[self.hf_expected_device_uc_addr_index] = self.hf_new_unicast_addr
             self.hf_output_hex_fw_bytearray[self.hf_expected_device_uc_addr_index_second] = self.hf_new_unicast_addr                       
@@ -122,7 +110,7 @@ class Hex_File(object):
             #Load it up with patched data
             self.hf_output_hex_fw.frombytes(self.hf_output_hex_fw_bytearray)
             #Write out new patched fw file
-            self.hf_output_hex_fw.write_hex_file(output_hex_file)
+            self.hf_output_hex_fw.write_hex_file(self.hf_output_hex_fw_name)
             #Create a new node for the new firmware            
             #Shallow copy from the original node
             self.hf_new_node = copy.copy(self.hf_working_node)
@@ -144,12 +132,16 @@ if __name__ == '__main__':
                         dest="hex_input_file",                        
                         required=True,                        
                         help=("Specify the Intel Hex file to be used as input. "
-                              + "Contents will be read from this file and patched. "
-                              + "This file will NOT be modified."))
+                              + "Contents will be read from this file and patched. This is the hex file that has been ripped from a provisioned node "
+                              + "by nrfjprog.  "
+                              + "This file shall NOT be modified."))
     parser.add_argument("--db-input-file",
                         dest="db_input_file",
                         required=True,                        
-                        help="Specify the JSON file that holds the mesh network state.")
+                        help="Specify the JSON file that holds the mesh network state.  "
+                            + "This is the full path and filename of the JSON database file from which we will be extracting device key and unicast address from. "
+                            + "This file is typically created by PyACI in scripts/interactive_pyaci/database/ directory and has the device key that matches the device key in the firmware."
+                        )
     parser.add_argument("--hex-output-file",
                         dest="hex_output_file",                        
                         required=True,                        
@@ -157,7 +149,8 @@ if __name__ == '__main__':
     parser.add_argument("--start-node",
                         dest="start_node",                        
                         required=False,
-                        type=validate_start_node,                        
+                        type=validate_start_node,
+                        default=None,
                         help="This is the zero-based index of the mesh node in the JSON file which correlates to the input firmware "
                                 + "file.  The device key and unicast address specified for this node in the database file "
                                 + "will be searched for in the firmware and replaced.  If not specified, the last node in the database file is used.  "
@@ -167,13 +160,15 @@ if __name__ == '__main__':
                         required=False,
                         type=validate_device_key,
                         metavar="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-                        help="A 32-character hexadecimal value that specifies a device key.  "
+                        default=None,
+                        help="A 32-character hexadecimal value that specifies a device key i.e. '0371592428B84C66F91D3466421C4FC1'.  "
                                 + "If not specified, a random value is auto-generated.  ")  
     parser.add_argument("--unicast-addr",
                         dest="unicast_address",                        
                         required=False,
                         type=validate_unicast_address,
                         metavar="0xyyyy",
+                        default=None,
                         help="A 16-bit hexadecimal value that specifies a unicast address.  "
                                 + "This value is unique per node.  If specified, ensure it is valid as uniqueness is not ascertained by this script.  "
                                 + "If not specified, a unique value is auto-generated.  ")  
