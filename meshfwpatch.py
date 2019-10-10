@@ -11,7 +11,8 @@ def validate_device_key(s):
         #Make sure user specified a string of 32 characters
         if (len(s) != 32):
             raise argparse.ArgumentTypeError('Must be 32 characters long hexadecimal string!')
-        int(s, 16)
+        else:            
+            return int(s, 16).to_bytes(16, byteorder="big", signed=False)
     except Exception as ex:
         raise argparse.ArgumentTypeError('Invalid device key specified!')
 
@@ -20,20 +21,21 @@ def validate_start_node(s):
         converted_int = int(s, 10)
         if ((converted_int < 0x0) or (converted_int > 0x3FFF)):
             raise argparse.ArgumentTypeError('Start node value must be a positive number and less than 0x4000!')
+        else:
+            return converted_int
     except Exception as ex:
         raise argparse.ArgumentTypeError('Invalid start node specified!')        
 
 def validate_unicast_address(s):
     try:
-        converted_int = int(s, 16)
+        return int(s, 16)
     except Exception as ex:
         raise argparse.ArgumentTypeError('Invalid unicast address specified!')
      
 class Hex_File(object):
     """
     This class handles patching the hex file with new device key and unicast address.            
-    """
-    #def __init__(self, hex_file, db_file, start_node=None):
+    """    
     def __init__(self, options):
         """
         Initializer function.
@@ -46,6 +48,7 @@ class Hex_File(object):
             self.hf_hex_file = IntelHex(options.hex_input_file)
             self.hf_number_of_nodes = len(self.hf_db.nodes)
             self.hf_start_node = options.start_node
+            logging.debug('Start node is {0}'.format(self.hf_start_node))
             if self.hf_start_node is not None:
                 self.hf_working_node = self.hf_db.nodes[self.hf_start_node]
             else:
@@ -54,8 +57,9 @@ class Hex_File(object):
             self.hf_new_device_key = options.device_key
             #Create new device key, if not specified
             if self.hf_new_device_key is None:
-                self.hf_new_device_key = uuid.uuid4()            
+                self.hf_new_device_key = uuid.uuid4().int.to_bytes(16, byteorder="big", signed=False)
             self.hf_new_unicast_addr = options.unicast_address
+            self.hf_new_node_name = options.node_name
         except Exception as ex:
             logging.exception("Initialization error")
                         
@@ -69,8 +73,9 @@ class Hex_File(object):
             #Convert hex data to byte string so we can easily find the device key
             self.hf_input_hex_fw_bytestr = self.hf_hex_file.tobinstr()
             #Convert hex data to byte array that will represent the output patched hex file
-            self.hf_output_hex_fw_bytearray = self.hf_hex_file.tobinarray()
+            self.hf_output_hex_fw_bytearray = self.hf_hex_file.tobinarray()            
             #Find the index where the device key starts
+            logging.debug('Looking for device key {0}'.format(self.hf_device_key.hex()))
             self.hf_device_key_index = self.hf_input_hex_fw_bytestr.find(self.hf_device_key)
             if (self.hf_device_key_index == -1):
                 logging.info('Device key not found! Are you sure the correct node is specified?')
@@ -104,7 +109,8 @@ class Hex_File(object):
             self.hf_output_hex_fw_bytearray[self.hf_expected_device_uc_addr_index_second] = self.hf_new_unicast_addr                       
             #Replace key in bytearray with new key
             for i in range(0, 16):
-                self.hf_output_hex_fw_bytearray[self.hf_device_key_index+i] = self.hf_new_device_key.bytes[i]                      
+                #self.hf_output_hex_fw_bytearray[self.hf_device_key_index+i] = self.hf_new_device_key.bytes[i]                                      
+                self.hf_output_hex_fw_bytearray[self.hf_device_key_index+i] = self.hf_new_device_key[i]
             #Create output IntelHex object
             self.hf_output_hex_fw = IntelHex()
             #Load it up with patched data
@@ -115,11 +121,14 @@ class Hex_File(object):
             #Shallow copy from the original node
             self.hf_new_node = copy.copy(self.hf_working_node)
             #Update device address and unicast address
-            self.hf_new_node.device_key = self.hf_new_device_key.hex
+            self.hf_new_node.device_key = self.hf_new_device_key.hex()
             self.hf_new_node.unicast_address = self.hf_new_unicast_addr
             self.hf_db.nodes.append(self.hf_new_node)
             #Update node name
-            self.hf_new_node.name += "_" + str(self.hf_new_unicast_addr)
+            if self.hf_new_node_name is None:
+                self.hf_new_node.name += "_" + str(self.hf_new_unicast_addr)
+            else:
+                self.hf_new_node.name = self.hf_new_node_name
             #Store to file
             self.hf_db.store()           
         except Exception as ex:
@@ -140,7 +149,8 @@ if __name__ == '__main__':
                         required=True,                        
                         help="Specify the JSON file that holds the mesh network state.  "
                             + "This is the full path and filename of the JSON database file from which we will be extracting device key and unicast address from. "
-                            + "This file is typically created by PyACI in scripts/interactive_pyaci/database/ directory and has the device key that matches the device key in the firmware."
+                            + "This file is typically created by PyACI in scripts/interactive_pyaci/database/ directory and has the device key that matches the device key in the firmware.  "
+                            + "This file will be MODIFIED to add the new node's information."
                         )
     parser.add_argument("--hex-output-file",
                         dest="hex_output_file",                        
@@ -154,7 +164,8 @@ if __name__ == '__main__':
                         help="This is the zero-based index of the mesh node in the JSON file which correlates to the input firmware "
                                 + "file.  The device key and unicast address specified for this node in the database file "
                                 + "will be searched for in the firmware and replaced.  If not specified, the last node in the database file is used.  "
-                                + "This value must be specified in base 10.")
+                                + "This value must be specified in base 10."
+                        )
     parser.add_argument("--device-key",
                         dest="device_key",                        
                         required=False,
@@ -162,7 +173,8 @@ if __name__ == '__main__':
                         metavar="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
                         default=None,
                         help="A 32-character hexadecimal value that specifies a device key i.e. '0371592428B84C66F91D3466421C4FC1'.  "
-                                + "If not specified, a random value is auto-generated.  ")  
+                                + "If not specified, a random value is auto-generated.  "
+                        )  
     parser.add_argument("--unicast-addr",
                         dest="unicast_address",                        
                         required=False,
@@ -171,14 +183,23 @@ if __name__ == '__main__':
                         default=None,
                         help="A 16-bit hexadecimal value that specifies a unicast address.  "
                                 + "This value is unique per node.  If specified, ensure it is valid as uniqueness is not ascertained by this script.  "
-                                + "If not specified, a unique value is auto-generated.  ")  
+                                + "If not specified, a unique value is auto-generated.  "
+                        )  
+    parser.add_argument("--node-name",
+                        dest="node_name",                        
+                        required=False,                                                
+                        default=None,
+                        help="Specify the new node's name to be recorded in the JSON file.  "                                
+                                + "If not specified, a unique name is auto-generated.  "
+                        )  
     parser.add_argument("-l", "--log-level",
                         dest="log_level",
                         type=int,
                         required=False,
                         default=3,
                         help=("Set default logging level: "
-                              + "1=Errors only, 2=Warnings, 3=Info, 4=Debug"))
+                              + "1=Errors only, 2=Warnings, 3=Info, 4=Debug")
+                        )
     options = parser.parse_args()
 
     if options.log_level == 1:
@@ -190,5 +211,8 @@ if __name__ == '__main__':
     else:
         options.log_level = logging.DEBUG
    
+    logging.basicConfig(level=options.log_level)
+   
     hx = Hex_File(options)
+    hx.patch_hex_file()
     
