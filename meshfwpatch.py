@@ -34,9 +34,9 @@ def validate_unicast_address(s):
 
 def list_db_info(s):
     try:
-        db = MeshDB(s)        
-        for i in db.nodes:
-            print('');
+        db = MeshDB(s)    
+        print('');
+        for i in db.nodes:            
             print('Node name: {0}'.format(i.name))
             print('Device key: {0}'.format(i.device_key.hex()))
             print('Unicast address: {0}'.format(hex(i.unicast_address)))
