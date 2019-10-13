@@ -1,6 +1,12 @@
+import sys
+
+if sys.version_info < (3, 5):
+    print(("ERROR: To use {} you need at least Python 3.5.\n" +
+           "You are currently using Python {}.{}").format(sys.argv[0], *sys.version_info))
+    sys.exit(1)
+
 from intelhex import IntelHex
 from mesh.database import MeshDB
-import sys
 import logging
 import copy
 import uuid
