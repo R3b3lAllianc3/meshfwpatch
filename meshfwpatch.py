@@ -97,7 +97,7 @@ class Hex_File(object):
             logging.debug('Looking for device key {0}'.format(self.hf_device_key.hex()))
             self.hf_device_key_index = self.hf_input_hex_fw_bytestr.find(self.hf_device_key)
             if (self.hf_device_key_index == -1):
-                logging.error('Device key not found! Are you sure the correct node is specified (--start-node) in the JSON file?')
+                logging.info('Device key not found! Are you sure the correct node is specified?')
                 raise ValueError('Device key not found in hex file!  Aborting!')
             logging.info("Device key found at location {0}".format(hex(self.hf_device_key_index)))
             #Sanity check!
