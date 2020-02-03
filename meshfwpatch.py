@@ -12,6 +12,16 @@ import copy
 import uuid
 import argparse  
 
+def validate_mesh_version(s):    
+    try:
+        converted_int = int(s, 10)
+        if ((converted_int != 400) and (converted_int != 320)):
+            raise argparse.ArgumentTypeError('Mesh SDK version must be 400 or 320!')
+        else:
+            return converted_int
+    except ValueError:
+        raise argparse.ArgumentTypeError('Invalid Mesh SDK version specified!')
+
 def validate_device_key(s):
     try:
         #Make sure user specified a string of 32 characters
@@ -19,7 +29,7 @@ def validate_device_key(s):
             raise argparse.ArgumentTypeError('Must be 32 characters long hexadecimal string!')
         else:            
             return int(s, 16).to_bytes(16, byteorder="big", signed=False)
-    except Exception as ex:
+    except ValueError:
         raise argparse.ArgumentTypeError('Invalid device key specified!')
 
 def validate_start_node(s):
@@ -28,14 +38,14 @@ def validate_start_node(s):
         if ((converted_int < 0x0) or (converted_int > 0x3FFF)):
             raise argparse.ArgumentTypeError('Start node value must be a positive number and less than 0x4000!')
         else:
-            return converted_int
-    except Exception as ex:
+            return converted_int 
+    except ValueError:
         raise argparse.ArgumentTypeError('Invalid start node specified!')        
 
 def validate_unicast_address(s):
     try:
         return int(s, 16)
-    except Exception as ex:
+    except ValueError:
         raise argparse.ArgumentTypeError('Invalid unicast address specified!')
 
 def list_db_info(s):
@@ -67,6 +77,16 @@ class Hex_File(object):
             self.hf_hex_file = IntelHex(options.hex_input_file)
             self.hf_number_of_nodes = len(self.hf_db.nodes)
             self.hf_start_node = options.start_node
+            self.hf_mesh_sdk_version = options.mesh_sdk_version
+            if (self.hf_mesh_sdk_version == 400):
+                self.START_OF_FLASH_MANAGER_OFFSET = 0x50
+                self.UNICAST_ADDRESS_OFFSET_1 = 0x1C
+                self.UNICAST_ADDRESS_OFFSET_2 = 0x4C
+            else:
+                #Else assuming v3.2.0 of Nordic Mesh SDK
+                self.START_OF_FLASH_MANAGER_OFFSET = 0x40
+                self.UNICAST_ADDRESS_OFFSET_1 = 0x1C
+                self.UNICAST_ADDRESS_OFFSET_2 = 0x3C
             logging.debug('Start node is {0}'.format(self.hf_start_node))
             if self.hf_start_node is not None:
                 self.hf_working_node = self.hf_db.nodes[self.hf_start_node]
@@ -87,6 +107,7 @@ class Hex_File(object):
         This function patches the hex file with the new device key and the new unicast address.        
         """
         try:
+            logging.debug('Patching for Mesh SDK version {0}'.format(self.hf_mesh_sdk_version))
             #Get the device key from the database file
             self.hf_device_key = self.hf_working_node.device_key
             #Convert hex data to byte string so we can easily find the device key
@@ -102,7 +123,7 @@ class Hex_File(object):
             logging.info("Device key found at location {0}".format(hex(self.hf_device_key_index)))
             #Sanity check!
             #Check for Flash Manager Area signature: https://infocenter.nordicsemi.com/topic/com.nordic.infocenter.meshsdk.v3.2.0/md_doc_libraries_flash_manager.html?cp=5_2_2_0
-            self.hf_expected_start_of_flash_manager_index = (self.hf_device_key_index - 64)
+            self.hf_expected_start_of_flash_manager_index = (self.hf_device_key_index - self.START_OF_FLASH_MANAGER_OFFSET)
             #This is where signature should be
             self.hf_flash_manager_sign_found = self.hf_input_hex_fw_bytestr.startswith(bytearray.fromhex('08041010'), (self.hf_expected_start_of_flash_manager_index), (self.hf_expected_start_of_flash_manager_index + 16))
             if (self.hf_flash_manager_sign_found == False):
@@ -111,8 +132,8 @@ class Hex_File(object):
             else:
                 logging.info('Flash Area Manager signature found at expected location {0}'.format(hex(self.hf_expected_start_of_flash_manager_index)))                      
             #Get offset for both occurences of device handle which also needs to be updated per device
-            self.hf_expected_device_uc_addr_index = (self.hf_expected_start_of_flash_manager_index + 28)
-            self.hf_expected_device_uc_addr_index_second = (self.hf_expected_start_of_flash_manager_index + 28 + 32)                                    
+            self.hf_expected_device_uc_addr_index = (self.hf_expected_start_of_flash_manager_index + self.UNICAST_ADDRESS_OFFSET_1)
+            self.hf_expected_device_uc_addr_index_second = (self.hf_expected_start_of_flash_manager_index + self.UNICAST_ADDRESS_OFFSET_2)                                    
             #Create new unicast address by reading all existing unicast addresses in the db file, finding the max, and incrementing the largest one by one.
             if self.hf_new_unicast_addr is None:                            
                 #Create a list of unicast addresses from the db file
@@ -127,8 +148,7 @@ class Hex_File(object):
             self.hf_output_hex_fw_bytearray[self.hf_expected_device_uc_addr_index] = self.hf_new_unicast_addr
             self.hf_output_hex_fw_bytearray[self.hf_expected_device_uc_addr_index_second] = self.hf_new_unicast_addr                       
             #Replace key in bytearray with new key
-            for i in range(0, 16):
-                #self.hf_output_hex_fw_bytearray[self.hf_device_key_index+i] = self.hf_new_device_key.bytes[i]                                      
+            for i in range(0, 16):                
                 self.hf_output_hex_fw_bytearray[self.hf_device_key_index+i] = self.hf_new_device_key[i]
             #Create output IntelHex object
             self.hf_output_hex_fw = IntelHex()
@@ -173,7 +193,7 @@ if __name__ == '__main__':
                               + "by nrfjprog.  "
                               + "This file shall NOT be modified."))
     parser.add_argument("--db-input-file",
-                        dest="db_input_file",
+                        dest="db_input_file",                        
                         required=True,                        
                         help="Specify the JSON file that holds the mesh network state.  "
                             + "This is the full path and filename of the JSON database file from which we will be extracting device key and unicast address from. "
@@ -220,6 +240,15 @@ if __name__ == '__main__':
                         default=None,
                         help="Specify the new node's name to be recorded in the JSON file.  "                                
                                 + "If not specified, a unique name is auto-generated."
+                        )
+    parser.add_argument("--mesh-sdk-version",
+                        dest="mesh_sdk_version",   
+                        default=400,
+                        required=False,
+                        metavar="400 or 320",
+                        type=validate_mesh_version,                        
+                        help="Specify the Nordic Mesh SDK version.  Only v4.0.0 and v3.2.0 have been tested.  Default is Nordic Mesh SDK v4.0.0.  Due to subtle differences in generated code, "                                
+                                + "it's necessary to discern between the Nordic Mesh SDK versions.  If not specified, v4.0.0 is assumed."
                         )
     parser.add_argument("-l", "--log-level",
                         dest="log_level",
