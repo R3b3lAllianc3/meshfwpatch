@@ -78,6 +78,7 @@ class Hex_File(object):
             self.hf_number_of_nodes = len(self.hf_db.nodes)
             self.hf_start_node = options.start_node
             self.hf_mesh_sdk_version = options.mesh_sdk_version
+            self.hf_clone_copies = options.clone_copies
             if (self.hf_mesh_sdk_version == 400):
                 self.START_OF_FLASH_MANAGER_OFFSET = 0x50
                 self.UNICAST_ADDRESS_OFFSET_1 = 0x1C
@@ -95,13 +96,18 @@ class Hex_File(object):
             self.hf_output_hex_fw_name = options.hex_output_file
             self.hf_new_device_key = options.device_key
             #Create new device key, if not specified
-            if self.hf_new_device_key is None:
-                self.hf_new_device_key = uuid.uuid4().int.to_bytes(16, byteorder="big", signed=False)
+            #if self.hf_new_device_key is None:
+                #self.hf_new_device_key = uuid.uuid4().int.to_bytes(16, byteorder="big", signed=False)
+            #    self.hf_new_device_key = _generate_new_device_key()
             self.hf_new_unicast_addr = options.unicast_address
             self.hf_new_node_name = options.node_name
+            self._hf_iteration = 0
         except Exception as ex:
             logging.exception("Initialization error")
-                        
+    
+    def _generate_new_device_key(self):
+        return uuid.uuid4().int.to_bytes(16, byteorder="big", signed=False)
+    
     def patch_hex_file(self):
         """
         This function patches the hex file with the new device key and the new unicast address.        
@@ -122,7 +128,7 @@ class Hex_File(object):
                 raise ValueError('Device key not found in hex file!  Aborting!')
             logging.info("Device key found at location {0}".format(hex(self.hf_device_key_index)))
             #Sanity check!
-            #Check for Flash Manager Area signature: https://infocenter.nordicsemi.com/topic/com.nordic.infocenter.meshsdk.v3.2.0/md_doc_libraries_flash_manager.html?cp=5_2_2_0
+            #Check for Flash Manager Area signature: https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.meshsdk.v4.0.0%2Fmd_doc_libraries_flash_manager.html
             self.hf_expected_start_of_flash_manager_index = (self.hf_device_key_index - self.START_OF_FLASH_MANAGER_OFFSET)
             #This is where signature should be
             self.hf_flash_manager_sign_found = self.hf_input_hex_fw_bytestr.startswith(bytearray.fromhex('08041010'), (self.hf_expected_start_of_flash_manager_index), (self.hf_expected_start_of_flash_manager_index + 16))
@@ -131,7 +137,7 @@ class Hex_File(object):
                 raise ValueError('Flash Area Manager signature not found at expected location {0}'.format(hex(self.hf_expected_start_of_flash_manager_index)))
             else:
                 logging.info('Flash Area Manager signature found at expected location {0}'.format(hex(self.hf_expected_start_of_flash_manager_index)))                      
-            #Get offset for both occurences of device handle which also needs to be updated per device
+            #Get offset for both occurences of device handle which also need to be updated per device
             self.hf_expected_device_uc_addr_index = (self.hf_expected_start_of_flash_manager_index + self.UNICAST_ADDRESS_OFFSET_1)
             self.hf_expected_device_uc_addr_index_second = (self.hf_expected_start_of_flash_manager_index + self.UNICAST_ADDRESS_OFFSET_2)                                    
             #Create new unicast address by reading all existing unicast addresses in the db file, finding the max, and incrementing the largest one by one.
@@ -143,33 +149,65 @@ class Hex_File(object):
                 #Find highest unicast address and increment by 1 to create new unicast address
                 self.next_unicast_address = max(self.unicast_address_list) + 1
                 logging.info('Next available unicast address is {0}'.format(hex(self.next_unicast_address)))
-                self.hf_new_unicast_addr = self.next_unicast_address                                       
-            #Update device unicast address in output bytearray
-            self.hf_output_hex_fw_bytearray[self.hf_expected_device_uc_addr_index] = self.hf_new_unicast_addr
-            self.hf_output_hex_fw_bytearray[self.hf_expected_device_uc_addr_index_second] = self.hf_new_unicast_addr                       
-            #Replace key in bytearray with new key
-            for i in range(0, 16):                
-                self.hf_output_hex_fw_bytearray[self.hf_device_key_index+i] = self.hf_new_device_key[i]
-            #Create output IntelHex object
-            self.hf_output_hex_fw = IntelHex()
-            #Load it up with patched data
-            self.hf_output_hex_fw.frombytes(self.hf_output_hex_fw_bytearray)
-            #Write out new patched fw file
-            self.hf_output_hex_fw.write_hex_file(self.hf_output_hex_fw_name)
-            #Create a new node for the new firmware            
-            #Shallow copy from the original node
-            self.hf_new_node = copy.copy(self.hf_working_node)
-            #Update device address and unicast address
-            self.hf_new_node.device_key = self.hf_new_device_key.hex()
-            self.hf_new_node.unicast_address = self.hf_new_unicast_addr
-            self.hf_db.nodes.append(self.hf_new_node)
-            #Update node name
-            if self.hf_new_node_name is None:
-                self.hf_new_node.name += "_" + str(self.hf_new_unicast_addr)
-            else:
-                self.hf_new_node.name = self.hf_new_node_name
-            #Store to file
-            self.hf_db.store()           
+                self.hf_new_unicast_addr = self.next_unicast_address
+
+
+            for x in range(self.hf_clone_copies):
+                ####Patch and write the cloned fw
+                #Update device unicast address in output bytearray
+                self.hf_output_hex_fw_bytearray[self.hf_expected_device_uc_addr_index] = self.hf_new_unicast_addr
+                self.hf_output_hex_fw_bytearray[self.hf_expected_device_uc_addr_index_second] = self.hf_new_unicast_addr                
+                #Generate new device key only if not specified on command line 
+                if (self.hf_new_device_key is None):
+                    self.hf_new_device_key = self._generate_new_device_key()
+                #Replace key in bytearray with new key
+                for i in range(0, 16):                
+                    self.hf_output_hex_fw_bytearray[self.hf_device_key_index+i] = self.hf_new_device_key[i]
+                #Create output IntelHex object...
+                self.hf_output_hex_fw = IntelHex()
+                #...and load it up with patched data
+                self.hf_output_hex_fw.frombytes(self.hf_output_hex_fw_bytearray)
+                #Write out new patched fw file
+                #New file name for each clone, except first one
+                if (self._hf_iteration == 0):
+                    self.hf_output_hex_fw.write_hex_file(self.hf_output_hex_fw_name)
+                    self._hf_iteration = self._hf_iteration + 1
+                else:
+                    self.hf_output_hex_fw_name += "_" + str(self._hf_iteration)
+                    self.hf_output_hex_fw.write_hex_file(self.hf_output_hex_fw_name)
+                ####Done patching and write the cloned fw
+                
+                ####Update JSON file with new node information
+                #Create a new node for the new firmware in the JSON file by shallow copying from the original node in the JSON file
+                self.hf_new_node = copy.copy(self.hf_working_node)
+                #Update device address and unicast address
+                self.hf_new_node.device_key = self.hf_new_device_key.hex()                            
+                self.hf_new_node.unicast_address = self.hf_new_unicast_addr
+                self.hf_db.nodes.append(self.hf_new_node)
+                #Update node name
+                if (self.hf_new_node_name is None):
+                    self.hf_new_node.name += "_" + str(self.hf_new_unicast_addr)
+                else:
+                    self.hf_new_node.name = self.hf_new_node_name
+                #Store to file
+                self.hf_db.store()   
+                ####Done updating JSON file with new node information
+                
+                ####Reinitialize variables for next iteration, if any
+                #Reset the device key so new one is generated in next iteration in case multiple clones are requested.
+                #This also means if device key is specified on command-line and multiple clones requested then only first 
+                #fw clone will have that specified key & the rest of clones will have auto-generated keys.
+                self.hf_new_device_key = None   
+                #Increment unicast address for next node, if there are more iterations.
+                #This also means if unicast address is specified on command-line and multiple clones requested then only first 
+                #fw clone will have that specified unicast address & the rest of clones will have unique unicast addresses generated by 
+                #incrementing command-line specified node by 1.
+                self.hf_new_unicast_addr = self.hf_new_unicast_addr + 1
+                #Reset node name to none for next iteration, if there are more iterations
+                #This also means if node name is specified on command-line and multiple clones requested then only first 
+                #fw clone will have that node name & the rest of clones will have auto-generated node names.
+                self.hf_new_node_name = None
+                ####Done reinitializing variables for next iteration, if any
         except Exception as ex:
             logging.exception("Hex file patching error")
             
@@ -203,7 +241,7 @@ if __name__ == '__main__':
     parser.add_argument("--hex-output-file",
                         dest="hex_output_file",                        
                         required=True,                        
-                        help="Specify the name of the patched output file that will be created.")
+                        help="Specify the name of the patched output file that will be created.  For multiple clones, specify base filename.")
     parser.add_argument("--start-node",
                         dest="start_node",                        
                         required=False,
@@ -232,7 +270,7 @@ if __name__ == '__main__':
                         default=None,
                         help="A 16-bit hexadecimal value that specifies a unicast address.  "
                                 + "This value is unique per node.  If specified, ensure it is valid as uniqueness is not ascertained by this script.  "
-                                + "If not specified, a unique value is auto-generated."
+                                + "If not specified, a unique value is auto-generated by incrementing the --start-node value (see help description for that flag)."
                         )  
     parser.add_argument("--node-name",
                         dest="node_name",                        
@@ -245,11 +283,22 @@ if __name__ == '__main__':
                         dest="mesh_sdk_version",   
                         default=400,
                         required=False,
-                        metavar="400 or 320",
+                        metavar="400 or 320",                        
                         type=validate_mesh_version,                        
                         help="Specify the Nordic Mesh SDK version.  Only v4.0.0 and v3.2.0 have been tested.  Default is Nordic Mesh SDK v4.0.0.  Due to subtle differences in generated code, "                                
                                 + "it's necessary to discern between the Nordic Mesh SDK versions.  If not specified, v4.0.0 is assumed."
                         )
+                        
+    parser.add_argument("--clone-copies",
+                        dest="clone_copies",   
+                        default=1,
+                        required=False,
+                        type=int,
+                        metavar="Number of firmware copies to create",
+                        help="Specify the number of copies to clone from the original firmware."
+                        #TODO: validate this as a positive number on the command line
+                        )
+                        
     parser.add_argument("-l", "--log-level",
                         dest="log_level",
                         type=int,
