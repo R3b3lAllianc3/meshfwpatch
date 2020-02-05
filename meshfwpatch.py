@@ -11,6 +11,7 @@ import logging
 import copy
 import uuid
 import argparse  
+import re
 
 def validate_mesh_version(s):    
     try:
@@ -106,7 +107,7 @@ class Hex_File(object):
             logging.exception("Initialization error")
     
     def _generate_new_device_key(self):
-        return uuid.uuid4().int.to_bytes(16, byteorder="big", signed=False)
+        return uuid.uuid4().int.to_bytes(16, byteorder="big", signed=False)       
     
     def patch_hex_file(self):
         """
@@ -127,7 +128,7 @@ class Hex_File(object):
                 logging.info('Device key not found! Are you sure the correct node is specified (--start-node)? ')
                 raise ValueError('Device key not found in hex file!  Aborting!')
             logging.info("Device key found at location {0}".format(hex(self.hf_device_key_index)))
-            #Sanity check!
+            #Sanity check: for the infinitesimally small chance that the device key occurs elsewhere in the hex file naturally!
             #Check for Flash Manager Area signature: https://infocenter.nordicsemi.com/index.jsp?topic=%2Fcom.nordic.infocenter.meshsdk.v4.0.0%2Fmd_doc_libraries_flash_manager.html
             self.hf_expected_start_of_flash_manager_index = (self.hf_device_key_index - self.START_OF_FLASH_MANAGER_OFFSET)
             #This is where signature should be
@@ -151,7 +152,6 @@ class Hex_File(object):
                 logging.info('Next available unicast address is {0}'.format(hex(self.next_unicast_address)))
                 self.hf_new_unicast_addr = self.next_unicast_address
 
-
             for x in range(self.hf_clone_copies):
                 ####Patch and write the cloned fw
                 #Update device unicast address in output bytearray
@@ -170,11 +170,14 @@ class Hex_File(object):
                 #Write out new patched fw file
                 #New file name for each clone, except first one
                 if (self._hf_iteration == 0):
-                    self.hf_output_hex_fw.write_hex_file(self.hf_output_hex_fw_name)
-                    self._hf_iteration = self._hf_iteration + 1
+                    logging.debug('Creating {0}'.format(self.hf_output_hex_fw_name))
+                    self.hf_output_hex_fw.write_hex_file(self.hf_output_hex_fw_name)                    
                 else:
-                    self.hf_output_hex_fw_name += "_" + str(self._hf_iteration)
-                    self.hf_output_hex_fw.write_hex_file(self.hf_output_hex_fw_name)
+                    self._hf_output_hex_fw_name_list = re.split('(\W)', self.hf_output_hex_fw_name)
+                    self._hf_output_hex_fw_name = self._hf_output_hex_fw_name_list[0] + "_" + str(self._hf_iteration) + "".join(self._hf_output_hex_fw_name_list[1:])
+                    logging.debug('Creating {0}'.format(self._hf_output_hex_fw_name))
+                    self.hf_output_hex_fw.write_hex_file(self._hf_output_hex_fw_name)
+                self._hf_iteration += 1
                 ####Done patching and write the cloned fw
                 
                 ####Update JSON file with new node information
