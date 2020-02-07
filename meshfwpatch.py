@@ -53,11 +53,14 @@ def list_db_info(s):
     try:
         db = MeshDB(s)    
         print('');
-        for i in db.nodes:            
+        index = 0
+        for i in db.nodes:
+            print('Index: {0}'.format(int(index)))
             print('Node name: {0}'.format(i.name))
             print('Device key: {0}'.format(i.device_key.hex()))
             print('Unicast address: {0}'.format(hex(i.unicast_address)))
             print('');
+            index += 1
     except Exception as ex:
         logging.exception("Error parsing JSON file")
     sys.exit(-1)
