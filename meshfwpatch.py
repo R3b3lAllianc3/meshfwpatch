@@ -98,11 +98,7 @@ class Hex_File(object):
             else:
                 self.hf_working_node = self.hf_db.nodes[(self.hf_number_of_nodes - 1)]
             self.hf_output_hex_fw_name = options.hex_output_file
-            self.hf_new_device_key = options.device_key
-            #Create new device key, if not specified
-            #if self.hf_new_device_key is None:
-                #self.hf_new_device_key = uuid.uuid4().int.to_bytes(16, byteorder="big", signed=False)
-            #    self.hf_new_device_key = _generate_new_device_key()
+            self.hf_new_device_key = options.device_key            
             self.hf_new_unicast_addr = options.unicast_address
             self.hf_new_node_name = options.node_name
             self._hf_iteration = 0
@@ -152,7 +148,7 @@ class Hex_File(object):
                     self.unicast_address_list.append(i.unicast_address)
                 #Find highest unicast address and increment by 1 to create new unicast address
                 self.next_unicast_address = max(self.unicast_address_list) + 1
-                logging.info('Next available unicast address is {0}'.format(hex(self.next_unicast_address)))
+                logging.debug('Next available unicast address is {0}'.format(hex(self.next_unicast_address)))
                 self.hf_new_unicast_addr = self.next_unicast_address
 
             for x in range(self.hf_clone_copies):
